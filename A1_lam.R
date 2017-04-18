@@ -1,0 +1,154 @@
+EN.test.lam <- spNmix.lam(EN14$y, EN14$X, M=1000, niters=11000,xlims=EN14$xlims, ylims=EN14$ylims, tune=c(10, 1, 2),cov=EN14$forest)
+
+
+#tune is sd for distribution of sigma, distribution of lambeta, distribution of S
+spNmix.lam <- function(n, X, M, niters, xlims, ylims, tune=c(10, 1, 2),cov,
+                       monitorS=FALSE)
+{
+  K <- ncol(n)
+  
+  # initial values
+  S <- cbind(runif(M, xlims[1], xlims[2]),
+             runif(M, ylims[1], ylims[2]))
+  #D is a matrix of distances between activity centers (rows) and traps (cols)
+  D <- e2dist1(S, X)
+  lambeta<-runif(1,0,5)
+  #sigma <- exp(sigbeta*cov)
+  #lam0 <- exp(lambeta*cov)/(1+exp(lambeta*cov))
+  sigma <-runif(1, 500, 2000)
+  lam0 <- runif(1,.1, 1)
+  #lam is a matrix same size as D, of detection probabilities for each individual at each trap
+  lam <- lam0*exp(-(D*D)/(2*sigma*sigma))
+  w <- rbinom(M, 1, .5)
+  psi <- runif(1, .2, .8)
+  #lamv.curr is vector of length ntraps of total detection probabilities
+  lamv.curr <- colSums(lam*w)
+  # just in case the first sigma is rejected
+  ll <- sum(dpois(n, lamv.curr, log=TRUE))
+  
+  # matrix to hold samples
+  out <- matrix(NA, nrow=niters, ncol=5)
+  colnames(out) <- c("sigma","lambeta", "psi", "N", "ll")
+  
+  Sout <- NULL
+  if(monitorS)
+    Sout <- array(NA, c(M, 2, niters))
+  
+  cat("\ninitial values =", c(sigma, lam0, psi, sum(w)), "\n\n")
+  
+  for(iter in 1:niters) {
+    
+    if(iter %% 100 ==0) {
+      cat("iter", iter, format(Sys.time(), "%H:%M:%S"), "\n")
+      cat("current =", out[iter-1,], "\n")
+      cat("  Acceptance rates\n")
+      cat("    S =", Sups/M, "\n")
+      cat("    w =", wUps/M, "\n")
+    }
+    
+    # update sigma
+    sigma.cand <- rnorm(1, sigma, tune[1])
+    if(sigma.cand > 0) {
+      lam.cand <- t(lam0*exp(t(-(D*D))/(2*sigma.cand*sigma.cand)))
+      lamv.cand <- colSums(lam.cand*w)
+      lamv.curr <- colSums(lam*w)
+      ll<- sum(dpois(n, lamv.curr, log=TRUE))
+      llcand<- sum(dpois(n, lamv.cand, log=TRUE) )
+      if(runif(1) < exp( llcand  - ll ) ){
+        ll <- llcand
+        lamv.curr <- lamv.cand
+        lam <- lam.cand
+        sigma <- sigma.cand
+      }
+    }
+    
+    # update lam0
+    lambeta.cand<-rnorm(1,lambeta,tune[2])
+    #logistic function (why?)
+    #        lam0.cand <- exp(lambeta.cand*cov)/(1+exp(lambeta.cand*cov))
+    lam0.cand <- (cov/1)^lambeta.cand
+    if(!(0%in%lam0.cand)) {
+      lam.cand <- t(lam0.cand*exp(t(-(D*D))/(2*sigma*sigma)))
+      lamv.cand <- colSums(lam.cand*w)
+      lamv.cand[lamv.cand==0]<-min(lamv.cand[lamv.cand!=0])
+      llcand <- sum(dpois(n, lamv.cand, log=TRUE) )
+      if(runif(1) < exp( llcand - ll ) ) {
+        ll <- llcand
+        lamv.curr<-lamv.cand
+        lam0<-lam0.cand
+        lam<-lam.cand
+        lambeta<-lambeta.cand
+      }
+    }
+    
+    
+    # update w, which is a vector of 0 and 1, of length M
+    wUps <- 0
+    for(i in 1:M) {
+      wcand <- w
+      wcand[i] <- if(w[i]==0) 1 else 0
+      lamv.cand <- colSums(lam*wcand)
+      llcand <- sum(dpois(n, lamv.cand, log=TRUE) )
+      prior <- dbinom(w[i], 1, psi, log=TRUE)
+      prior.cand <- dbinom(wcand[i], 1, psi, log=TRUE)
+      if(runif(1) < exp((llcand+prior.cand) - (ll+prior))) {
+        w <- wcand
+        lamv.curr <- lamv.cand
+        ll <- llcand
+        wUps <- wUps+1
+      }
+    }
+    
+    # update psi
+    psi <- rbeta(1, 1+sum(w), 1+M-sum(w))
+    
+    # update S
+    Sups <- 0
+    for(i in 1:M) {
+      Scand <-c(rnorm(1, S[i,1], tune[3]), rnorm(1, S[i,2], tune[3]))
+      inbox <- Scand[1]>=xlims[1] & Scand[1]<=xlims[2] &
+        Scand[2]>=ylims[1] & Scand[2]<=ylims[2]
+      if(!inbox)
+        next
+      dtmp <- sqrt( (Scand[1] - X[,1])^2 + (Scand[2] - X[,2])^2 )
+      lam.cand <- lam
+      lam.cand[i,] <-  lam0*exp(-(dtmp*dtmp)/(2*sigma*sigma))
+      lamv.cand <- colSums(lam.cand*w)
+      llcand <- sum(dpois(n, lamv.cand, log=TRUE) )
+      if(runif(1)< exp(llcand - ll)) {
+        ll <- llcand
+        lamv.curr <- lamv.cand
+        S[i,] <- Scand
+        lam <- lam.cand
+        D[i,] <- dtmp
+        Sups <- Sups+1
+      }
+    }
+    out[iter,] <- c(sigma,lambeta,psi,sum(w),ll )
+    if(monitorS)
+      Sout[1:sum(w),,iter] <- S[w==1,]
+  }
+  last <- list(S=S, lam=lam, w=w)
+  list(out=out, last=last, Sout=Sout)
+}
+
+summary(EN.test.lam$out)
+
+# Histories
+par(mfrow=c(2,2))
+plot(m1$out[1:11000,1], type="l", ylab="sigma")
+plot(m1$out[1:11000,2], type="l", ylab="lam0")
+plot(m1$out[1:11000,3], type="l", ylab="psi")
+plot(m1$out[1:11000,4], type="l", ylab="N")
+
+# Densities
+par(mfrow=c(2,2))
+plot(density(m1$out[1001:11000,1]), xlab="sigma", main="")
+plot(density(m1$out[1001:11000,2]), xlab="lam0", main="")
+plot(density(m1$out[1001:11000,3]), xlab="psi", main="")
+hist(EN.test.lam$out[1001:11000,4], xlab="N", freq=FALSE, main="")
+
+
+
+##logit - keeps response between 0 and 1 (1/(1+exp(-(int+(beta*cov)))))
+##log - exp(int+beta*cov), where int should be the log of max value, beta is rate of increase/decrease
