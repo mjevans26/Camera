@@ -1,21 +1,21 @@
-
+EN14 <- readRDS(file = "input_data.rds")
 library(rgdal)
-DEV<-readOGR("D:/MikeGradSchool/PhD/GIS/SMRC", "NEB_DensClass_SPm")
-xlims <- DEV@bbox[1,]
-ylims <- DEV@bbox[2,]
-pts <- SpatialPoints(S, proj4string = DEV@proj4string)
-w[,2] <- over(pts, DEV)[,1]
+DEV<-readOGR("I:/MikeGradSchool/PhD/GIS/SMRC", "NEB_DensClass_SPm")
+bounds <- readOGR("I:/MikeGradSchool/PhD/GIS/SMRC/Buffers", "NEB10kBuff")
+DEV@data[,1] <- as.numeric(DEV@data[,2])
 
 psi <- c(rbeta(1, 1+sum(w[which(w[,2]==1), 1]), 1+M-sum(w[which(w[,2]==1), 1])),
          rbeta(1, 1+sum(w[which(w[,2]==2), 1]), 1+M-sum(w[which(w[,2]==2), 1])),
          rbeta(1, 1+sum(w[which(w[,2]==3), 1]), 1+M-sum(w[which(w[,2]==3), 1]))
 )
 
-spNmix_den <- function(n, X, M, niters, xlims, ylims, tune=c(0.2, 10, 0.2, 0.2, 5),cov,
-                       mask, monitorS=FALSE)
+spNmix_den <- function(n, X, M, niters, tune=c(0.2, 10, 0.2, 0.2, 5),cov,
+                       mask, area, monitorS=FALSE)
 {
   K <- ncol(n)
   levs <- length(unique(mask@data[,1]))
+  xlims <- area@polygons[[1]]@Polygons[[1]]@coords[,1]
+  ylims <- area@polygons[[1]]@Polygons[[1]]@coords[,2]
   ## initial values
   ## generate random points inside mask instead of bounding box
   pts <- spsample(mask, M, type= "random")
@@ -34,7 +34,7 @@ spNmix_den <- function(n, X, M, niters, xlims, ylims, tune=c(0.2, 10, 0.2, 0.2, 
   #w <- rbinom(M, 1, .5)
   ## create w as matrix with 2nd column indicating which portion of
   ## density mask individual i falls in.  Starts at 1
-  w <- matrix(c(rbinom(M, 1, .5), rep(1,M)), ncol = 2)
+  w <- matrix(c(rbinom(M, 1, .5), over(pts, mask)[,1]), ncol = 2)
   #psi <- runif(1, .2, .8)
   ## psi as vector of inclusion probabilities for individuals with one
   ## value per level of density mask
@@ -132,9 +132,11 @@ spNmix_den <- function(n, X, M, niters, xlims, ylims, tune=c(0.2, 10, 0.2, 0.2, 
     Sups <- 0
     for(i in 1:M) {
       Scand <-c(rnorm(1, S[i,1], tune[5]), rnorm(1, S[i,2], tune[5]))
-      inbox <- Scand[1]>=xlims[1] & Scand[1]<=xlims[2] &
-        Scand[2]>=ylims[1] & Scand[2]<=ylims[2]
-      if(!inbox)
+      #inbox <- Scand[1]>=xlims[1] & Scand[1]<=xlims[2] &
+        #Scand[2]>=ylims[1] & Scand[2]<=ylims[2]
+      ##alternative using sp to check that new activity center is within 
+      ## study area
+      if(point.in.polygon(Scand[1], Scand[2], xlims, ylims) == 0)
         next
       dtmp <- sqrt( (Scand[1] - X[,1])^2 + (Scand[2] - X[,2])^2 )
       lam.cand <- lam
@@ -150,6 +152,9 @@ spNmix_den <- function(n, X, M, niters, xlims, ylims, tune=c(0.2, 10, 0.2, 0.2, 
         Sups <- Sups+1
       }
     }
+    ## assign mask region value to w based on new locations for S
+    pts <- SpatialPoints(S, proj4string = mask@proj4string)
+    w[,2] <- over(pts, mask)[,1]
     out[iter,] <- c(lamint, lambeta, sigint, sigbeta, psi, sum(w[,1]), ll )
     if(monitorS)
       Sout[1:sum(w[,1]),,iter] <- S[w==1,]
@@ -157,3 +162,6 @@ spNmix_den <- function(n, X, M, niters, xlims, ylims, tune=c(0.2, 10, 0.2, 0.2, 
   last <- list(S=S, lam=lam, w=w)
   list(out=out, last=last, Sout=Sout)
 }
+
+test <- spNmix_den(EN14$y, EN14$X, 700, 50000, tune=c(0.2, 10, 0.2, 0.2, 5), EN14$forest,
+                   DEV, bounds, monitorS=FALSE)

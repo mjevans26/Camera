@@ -1,0 +1,523 @@
+
+
+Supplement A(1)
+"Spatially-explicit models for inference about density in unmarked
+and partially marked populations" by Chandler and Royle.
+
+
+
+
+PART 1
+R code to fit the model to simulated data using the 2 MCMC algorithms
+
+
+
+# NOTE: to run the following code, you must bring in the functions
+# in PART 2 and the dataset in PART 3 (see below)
+
+
+
+# Simulate a dataset and estimate parameters using algorithm 1
+# The spNmix function *does not* update the latent z[i,j,k] variables,
+# ie, it is the unconditional-on-z formulation.
+set.seed(343892)
+str(sim1 <- sim.data(N=25, sigma=0.5, lam0=0.5))
+m1 <- spNmix(sim1$n, sim1$X, M=100, niters=11000,
+             xlims=sim1$xlims, ylims=sim1$ylims, tune=c(0.05, 0.15, 2))
+
+summary(m1$out)
+
+# Histories
+par(mfrow=c(2,2))
+plot(m1$out[1:11000,1], type="l", ylab="sigma")
+plot(m1$out[1:11000,2], type="l", ylab="lam0")
+plot(m1$out[1:11000,3], type="l", ylab="psi")
+plot(m1$out[1:11000,4], type="l", ylab="N")
+
+# Densities
+par(mfrow=c(2,2))
+plot(density(m1$out[1001:11000,1]), xlab="sigma", main="")
+plot(density(m1$out[1001:11000,2]), xlab="lam0", main="")
+plot(density(m1$out[1001:11000,3]), xlab="psi", main="")
+hist(m1$out[1001:11000,4], xlab="N", freq=FALSE, main="")
+
+
+
+
+
+
+
+# Use sim1 data and estimate parameters using algorithm 2, spNmixZ
+# The spNmixZ function uses the conditional-on-z algorithm
+# The output is the same, but the algorithm is much slower
+m2 <- spNmixZ(sim1$n, sim1$X, M=100, niters=11000,
+              xlims=sim1$xlims, ylims=sim1$ylims, tune=c(0.05, 0.15, 2))
+
+summary(m2$out)
+
+# Histories
+par(mfrow=c(2,2))
+plot(m2$out[1:11000,1], type="l", ylab="sigma")
+plot(m2$out[1:11000,2], type="l", ylab="lam0")
+plot(m2$out[1:11000,3], type="l", ylab="psi")
+plot(m2$out[1:11000,4], type="l", ylab="N")
+
+# Densities
+par(mfrow=c(2,2))
+plot(density(m2$out[1001:11000,1]), xlab="sigma", main="")
+plot(density(m2$out[1001:11000,2]), xlab="lam0", main="")
+plot(density(m2$out[1001:11000,3]), xlab="psi", main="")
+hist(m2$out[1001:11000,4], xlab="N", freq=FALSE, main="")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+PART 2
+R functions required to fit the model using the code in PART 1
+
+
+
+
+
+# Distance between sample locations and activity centers
+# Faster than using loops
+e2dist1 <- function (x, y)
+{
+    i <- sort(rep(1:nrow(y), nrow(x)))
+    dvec <- sqrt((x[, 1] - y[i, 1])^2 + (x[, 2] - y[i, 2])^2)
+    matrix(dvec, nrow = nrow(x), ncol = nrow(y), byrow = F)
+}
+
+
+
+# Simulate data
+sim.data <- function(N=30, K=5, sigma=.6, lam0=1.5, side=10,
+                     xlims=c(0, 15), ylims=c(0, 15))
+{
+    coords <- seq(3, 12, length=side)
+    X <- cbind(x=rep(coords, each=side), y=rep(coords, times=side))
+    J <- nrow(X) # Number of sample locations
+    sx <- runif(N, xlims[1], xlims[2])
+    sy <- runif(N, ylims[1], ylims[2])
+    S <- cbind(sx, sy) # Activity centers
+    D <- e2dist1(S, X) # Distance matrix
+    lam <- lam0*exp(-(D*D)/(2*sigma*sigma)) # Expected encounter rates
+    z <- array(NA, c(N, J, K))
+    n <- matrix(NA, nrow=J, ncol=K)
+    for(k in 1:K) {
+        z[,,k] <- rpois(N*J, lam) # latent encounters
+        n[,k] <- colSums(z[,,k])  # observed counts
+    }
+    list(n=n, N=N, sigma=sigma, lam0=lam0, X=X, S=S, z=z, xlims=xlims,
+         ylims=ylims)
+}
+
+
+
+
+
+
+# Draw posterior samples using MCMC
+# This version does not update z
+spNmix <- function(n, X, M, niters, xlims, ylims, tune=c(0.1, 0.1, 2),
+                   monitorS=FALSE)
+{
+    K <- ncol(n)
+
+    # initial values
+    S <- cbind(runif(M, xlims[1], xlims[2]),
+               runif(M, ylims[1], ylims[2]))
+    D <- e2dist1(S, X)
+    sigma <-runif(1, .25, 1.25)
+    lam0 <- runif(1, .1, 1)
+    lam <- lam0*exp(-(D*D)/(2*sigma*sigma))
+    w <- rbinom(M, 1, .7)
+    psi <- runif(1, .2, .8)
+    lamv.curr <- colSums(lam*w)
+    # just in case the first sigma is rejected
+    ll <- sum(dpois(n, lamv.curr, log=TRUE))
+
+    # matrix to hold samples
+    out <- matrix(NA, nrow=niters, ncol=4)
+    colnames(out) <- c("sigma", "lam0", "psi", "N")
+
+    Sout <- NULL
+    if(monitorS)
+        Sout <- array(NA, c(M, 2, niters))
+
+    cat("\ninitial values =", c(sigma, lam0, psi, sum(w)), "\n\n")
+
+    for(iter in 1:niters) {
+
+        if(iter %% 100 ==0) {
+            cat("iter", iter, format(Sys.time(), "%H:%M:%S"), "\n")
+            cat("current =", out[iter-1,], "\n")
+            cat("  Acceptance rates\n")
+            cat("    S =", Sups/M, "\n")
+            cat("    w =", wUps/M, "\n")
+        }
+
+        # update sigma
+        sigma.cand <- rnorm(1, sigma, tune[1])
+        if(sigma.cand > 0) {
+            lam.cand <- lam0*exp(-(D*D)/(2*sigma.cand*sigma.cand))
+            lamv.cand <- colSums(lam.cand*w)
+            lamv.curr <- colSums(lam*w)
+            ll<- sum(dpois(n, lamv.curr, log=TRUE))
+            llcand<- sum(dpois(n, lamv.cand, log=TRUE) )
+            if(runif(1) < exp( llcand  - ll ) ){
+                ll <- llcand
+                lamv.curr <- lamv.cand
+                lam <- lam.cand
+                sigma <- sigma.cand
+            }
+        }
+
+        # update lam0
+        lam0.cand <- rnorm(1, lam0, tune[2])
+        if(lam0.cand>0) {
+            lam.cand <- lam0.cand*exp(-(D*D)/(2*sigma*sigma))
+            lamv.cand <- colSums(lam.cand*w)
+            llcand <- sum(dpois(n, lamv.cand, log=TRUE) )
+            if(runif(1) < exp( llcand - ll ) ) {
+                ll <- llcand
+                lamv.curr<-lamv.cand
+                lam0<-lam0.cand
+                lam<-lam.cand
+            }
+        }
+
+
+        # update w
+        wUps <- 0
+        for(i in 1:M) {
+            wcand <- w
+            wcand[i] <- if(w[i]==0) 1 else 0
+            lamv.cand <- colSums(lam*wcand)
+            llcand <- sum(dpois(n, lamv.cand, log=TRUE) )
+            prior <- dbinom(w[i], 1, psi, log=TRUE)
+            prior.cand <- dbinom(wcand[i], 1, psi, log=TRUE)
+            if(runif(1) < exp((llcand+prior.cand) - (ll+prior))) {
+                w <- wcand
+                lamv.curr <- lamv.cand
+                ll <- llcand
+                wUps <- wUps+1
+            }
+        }
+
+        # update psi
+        psi <- rbeta(1, 1+sum(w), 1+M-sum(w))
+
+        # update S
+        Sups <- 0
+        for(i in 1:M) {
+            Scand <-c(rnorm(1, S[i,1], tune[3]), rnorm(1, S[i,2], tune[3]))
+            inbox <- Scand[1]>=xlims[1] & Scand[1]<=xlims[2] &
+                     Scand[2]>=ylims[1] & Scand[2]<=ylims[2]
+            if(!inbox)
+                next
+            dtmp <- sqrt( (Scand[1] - X[,1])^2 + (Scand[2] - X[,2])^2 )
+            lam.cand <- lam
+            lam.cand[i,] <-  lam0*exp(-(dtmp*dtmp)/(2*sigma*sigma))
+            lamv.cand <- colSums(lam.cand*w)
+            llcand <- sum(dpois(n, lamv.cand, log=TRUE) )
+            if(runif(1)< exp(llcand - ll)) {
+                ll <- llcand
+                lamv.curr <- lamv.cand
+                S[i,] <- Scand
+                lam <- lam.cand
+                D[i,] <- dtmp
+                Sups <- Sups+1
+            }
+        }
+        out[iter,] <- c(sigma,lam0,psi,sum(w) )
+        if(monitorS)
+            Sout[1:sum(w),,iter] <- S[w==1,]
+    }
+    last <- list(S=S, lam=lam, w=w)
+    list(out=out, last=last, Sout=Sout)
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Draw posterior samples using MCMC
+# This version *does* update z
+spNmixZ <- function(n, X, M, niters, xlims, ylims, tune=c(0.1, 0.1, 3))
+{
+    J <- nrow(n)
+    K <- ncol(n)
+
+    # initial values
+    S <- cbind(runif(M,0,15), runif(M,0,15))
+    D <- e2dist1(S, X)
+    sigma <-runif(1, .25, 1.25)
+    lam0 <- runif(1, .1, 1)
+    lam <- lam0*exp(-(D*D)/(2*sigma*sigma))
+    w <- rbinom(M, 1, .7)
+    psi <- runif(1, .2, .8)
+    z <- array(NA, c(M,J,K))
+    for(j in 1:J) {
+        for(k in 1:K) {
+            z[,j,k] <- rmultinom(1, n[j,k], lam[,j]*w)
+        }
+    }
+    # in case the first sigma.cand is rejected
+    ll <- sum(dpois(z, lam*w, log=TRUE))
+
+    # matrix to hold samples
+    out <- matrix(NA, nrow=niters, ncol=4)
+    colnames(out) <- c("sigma", "lam0", "psi", "N")
+
+    cat("\ninitial values =", c(sigma, lam0, psi, sum(w)), "\n\n")
+
+    for(iter in 1:niters) {
+
+        if(iter %% 100 ==0) {
+            cat("iter", iter, format(Sys.time(), "%H:%M:%S"), "\n")
+            cat("current =", out[iter-1,], "\n")
+            cat("  Acceptance rates\n")
+            cat("    S =", Sups/M, "\n")
+            cat("    w =", wUps/M, "\n")
+        }
+
+        # update sigma
+        sigma.cand <- rnorm(1, sigma, tune[1])
+        if(sigma.cand > 0) {
+            lam.cand <- lam0*exp(-(D*D)/(2*sigma.cand*sigma.cand))
+            ll<- sum(dpois(z, lam*w, log=TRUE))
+            llcand<- sum(dpois(z, lam.cand*w, log=TRUE) )
+            if(runif(1)<exp( llcand  - ll ) ){
+                ll <- llcand
+                lam <- lam.cand
+                sigma <- sigma.cand
+            }
+        }
+
+        # update lam0
+        lam0.cand <- rnorm(1, lam0, tune[2])
+        if(lam0.cand>0) {
+            lam.cand <- lam0.cand*exp(-(D*D)/(2*sigma*sigma))
+            llcand<- sum(dpois(z, lam.cand*w, log=TRUE) )
+            if(runif(1) < exp( llcand - ll ) ) {
+                lam0<-lam0.cand
+                lam<-lam.cand
+                ll <- llcand
+            }
+        }
+
+        # update w
+        wUps <- 0
+        for(i in 1:M) {
+            wcand<-w
+            wcand[i] <- if(w[i]==0) 1 else 0
+            llcand <- sum(dpois(z, lam*wcand, log=TRUE) )
+            prior <- dbinom(w[i], 1, psi, log=TRUE)
+            prior.cand <- dbinom(wcand[i], 1, psi, log=TRUE)
+            if(runif(1) < exp((llcand+prior.cand) - (ll+prior))) {
+                w <- wcand
+                ll <- llcand
+                wUps <- wUps+1
+            }
+        }
+
+        # update psi
+        psi <- rbeta(1, 1+sum(w), 1+M-sum(w))
+
+        # update S
+        Sups <- 0
+        for(i in 1:M) {
+            Scand <- c(rnorm(1, S[i,1], tune[3]),
+                       rnorm(1, S[i,2], tune[3]))
+            inbox <- Scand[1]>=xlims[1] & Scand[1]<=xlims[2] &
+                     Scand[2]>=ylims[1] & Scand[2]<=ylims[2]
+            if(!inbox)
+                next
+            dtmp <- sqrt( (Scand[1] - X[,1])^2 + (Scand[2] - X[,2])^2 )
+            lam.cand <- lam
+            lam.cand[i,] <-  lam0*exp(-(dtmp*dtmp)/(2*sigma*sigma))
+            llcand <- sum(dpois(z, lam.cand*w, log=TRUE) )
+            if(runif(1)< exp(llcand - ll)) {
+                ll <- llcand
+                S[i,] <- Scand
+                lam <- lam.cand
+                D[i,] <- dtmp
+                Sups <- Sups+1
+            }
+        }
+
+        # update z
+        for(j in 1:J) {
+            zip <- lam[,j]*w
+            probs <- zip/sum(zip)
+            for(k in 1:K)
+                z[,j,k] <- rmultinom(1, n[j,k], probs)
+            }
+#        }
+
+        ll <- sum(dpois(z, lam*w, log=TRUE))
+
+        out[iter,] <- c(sigma,lam0,psi,sum(w) )
+    }
+    last <- list(S=S, lam=lam, w=w)
+    list(out=out, last=last)
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+PART 3
+The northern parula dataset, which can be source()d directly into R.
+
+
+nopaDat <-
+structure(list(y = structure(c(0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0,
+1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1,
+1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0,
+0, 1, 2, 1, 1, 1, 1, 0, 1, 2, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1,
+1, 0, 2, 0, 1, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0,
+0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0,
+0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1,
+1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 2, 1, 1, 1, 0, 0, 0,
+0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0,
+0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0,
+1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 2, 1, 1, 1, 1, 1, 1, 1, 1,
+1, 0, 0, 0, 1, 2, 0, 1, 0, 0, 0), .Dim = c(105L, 3L), .Dimnames = list(
+    c("4005", "3055", "3005", "2055", "2005", "1055", "1005",
+    "4100", "3150", "3100", "2150", "2100", "1150", "1100", "4105",
+    "3155", "3105", "2155", "2105", "1155", "1105", "4200", "3250",
+    "3200", "2250", "2200", "1250", "1200", "4205", "3255", "3205",
+    "2255", "2205", "1255", "1205", "4300", "3350", "3300", "2350",
+    "2300", "1350", "1300", "4305", "3355", "3305", "2355", "2305",
+    "1355", "1305", "4400", "3450", "3400", "2450", "2400", "1450",
+    "1400", "4405", "3455", "3405", "2455", "2405", "1455", "1405",
+    "4500", "3550", "3500", "2550", "2500", "1550", "1500", "4505",
+    "3555", "3505", "2555", "2505", "1555", "1505", "4600", "3650",
+    "3600", "2650", "2600", "1650", "1600", "4605", "3655", "3605",
+    "2655", "2605", "1655", "1605", "4700", "3750", "3700", "2750",
+    "2700", "1750", "1700", "4705", "3755", "3705", "2755", "2705",
+    "1755", "1705"), c("v1", "v2", "v3"))), X = structure(c(5,
+5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 8,
+8, 8, 8, 8, 8, 8, 9, 9, 9, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10,
+10, 11, 11, 11, 11, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12, 13,
+13, 13, 13, 13, 13, 13, 14, 14, 14, 14, 14, 14, 14, 15, 15, 15,
+15, 15, 15, 15, 16, 16, 16, 16, 16, 16, 16, 17, 17, 17, 17, 17,
+17, 17, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 19, 19, 19,
+5, 6, 7, 8, 9, 10, 11, 5, 6, 7, 8, 9, 10, 11, 5, 6, 7, 8, 9,
+10, 11, 5, 6, 7, 8, 9, 10, 11, 5, 6, 7, 8, 9, 10, 11, 5, 6, 7,
+8, 9, 10, 11, 5, 6, 7, 8, 9, 10, 11, 5, 6, 7, 8, 9, 10, 11, 5,
+6, 7, 8, 9, 10, 11, 5, 6, 7, 8, 9, 10, 11, 5, 6, 7, 8, 9, 10,
+11, 5, 6, 7, 8, 9, 10, 11, 5, 6, 7, 8, 9, 10, 11, 5, 6, 7, 8,
+9, 10, 11, 5, 6, 7, 8, 9, 10, 11), .Dim = c(105L, 2L), .Dimnames = list(
+    NULL, c("x", "y"))), xSide = 24, ySide = 16, M = 100, nTraps = 105L,
+    nReps = 3L), .Names = c("y", "X", "xSide", "ySide", "M",
+"nTraps", "nReps"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+PART 4
+Commented R code describing method used to obtain
+informative prior used in the analysis of the parula dataset.
+
+
+
+# Moldenhauer and Regelski (1996) state that home range size typically
+# ranges from 0.08-0.65 ha, which equates to a radius of
+
+sqrt(0.08/pi*10000) # 15.96 m or
+sqrt(0.65/pi*10000) # 45.49 m
+
+# Since parulas were detected by song, let's be safe
+# and add a minimum and maximum
+# distance at which they could be heard, 50 and 250 m, based upon
+# Simons et al. (2009).
+# So now we have an area between
+
+(15.96+50)^2*pi / 10000  # 1.37 ha, and
+(45.49+250)^2*pi / 10000 # 27.4 ha
+
+# We note that this is a very large range.
+
+# Following Royle et. al (2011), and assuming a
+# chi-squared distribution with 2 degrees of freedom,
+# the range of sigma is given by
+
+sqrt(1.37*10000/pi)/sqrt(5.99)   # 27 m
+sqrt(27.4*10000/pi)/sqrt(5.99)   # 120 m
+
+# In our grid spacing, 1 unit = 50m, so our we want a prior with most
+# of the density between:
+
+27/50  # 0.54
+121/50 # 2.42
+
+# Gamma(13, 10) covers this nicely
+qgamma(c(0.001, 0.5, 0.999), 13, 10)
+
+plot(function(x) dgamma(x, 13, 10), 0, 5, xlim=c(0, 3), ylim=c(0, 1.5))
+
+
