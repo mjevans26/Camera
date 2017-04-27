@@ -91,7 +91,7 @@ spNmix_den <- function(n, X, M, niters, tune=c(0.2, 10, 0.2, 0.2, 5),cov,
     lamint.cand<-rnorm(1, lamint,tune[3])
     lambeta.cand<-rnorm(1,lambeta,tune[4])
     lam0.cand <- exp(lamint.cand + (lambeta.cand*cov))/(1+exp(lamint.cand + (lambeta.cand*cov)))
-    if(lam0.cand>0) {
+    if(! 0 %in% lam0.cand) {
       lam.cand <- t(lam0.cand*exp(t(-(D*D))/(2*sigma*sigma)))
       lamv.cand <- colSums(lam.cand*w[,1])
       llcand <- sum(dpois(n, lamv.cand, log=TRUE) )
@@ -113,12 +113,12 @@ spNmix_den <- function(n, X, M, niters, tune=c(0.2, 10, 0.2, 0.2, 5),cov,
       llcand <- sum(dpois(n, lamv.cand, log=TRUE) )
       prior <- dbinom(w[i,1], 1, psi[w[i,2]], log=TRUE)
       prior.cand <- dbinom(wcand[i,1], 1, psi[w[i,2]], log=TRUE)
-      if(runif(1) < exp((llcand+prior.cand) - (ll+prior))) {
+      tryCatch(if(runif(1) < exp((llcand+prior.cand) - (ll+prior))) {
         w <- wcand
         lamv.curr <- lamv.cand
         ll <- llcand
         wUps <- wUps+1
-      }
+      }, error = stop(), finally = print(c(exp((llcand+prior.cand)-(ll+prior)),psi[w[i,2]])))
     }
     
     # update psi
@@ -136,7 +136,7 @@ spNmix_den <- function(n, X, M, niters, tune=c(0.2, 10, 0.2, 0.2, 5),cov,
         #Scand[2]>=ylims[1] & Scand[2]<=ylims[2]
       ##alternative using sp to check that new activity center is within 
       ## study area
-      if(point.in.polygon(Scand[1], Scand[2], xlims, ylims) == 0)
+      if(point.in.polygon(Scand[1], Scand[2], xlims, ylims) != 1)
         next
       dtmp <- sqrt( (Scand[1] - X[,1])^2 + (Scand[2] - X[,2])^2 )
       lam.cand <- lam
