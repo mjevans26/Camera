@@ -115,6 +115,7 @@ spNmix_den <- function(n, X, M, niters, tune=c(0.2, 10, 0.2, 0.2, 5),cov,
       llcand <- sum(dpois(n, lamv.cand, log=TRUE) )
       prior <- dbinom(w[i,1], 1, psi[w[i,2]], log=TRUE)
       prior.cand <- dbinom(wcand[i,1], 1, psi[w[i,2]], log=TRUE)
+
       #tryCatch(
       if(runif(1) < exp((llcand + prior.cand) - (ll + prior))) {
         w <- wcand
