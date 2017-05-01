@@ -1,7 +1,7 @@
 EN14 <- readRDS(file = "input_data.rds")
 library(rgdal)
-DEV<-readOGR("I:/MikeGradSchool/PhD/GIS/SMRC", "NEB_DensClass_Simple_SPm")
-bounds <- readOGR("I:/MikeGradSchool/PhD/GIS/SMRC/Buffers", "NEB10kBuff")
+DEV<-readOGR("D:/MikeGradSchool/PhD/GIS/SMRC", "NEB_DensClass_3kelim_SPm")
+bounds <- readOGR("D:/MikeGradSchool/PhD/GIS/SMRC/Buffers", "NEB10kBuff")
 DEV@data[,1] <- as.numeric(DEV@data[,1])
 
 psi <- c(rbeta(1, 1+sum(w[which(w[,2]==1), 1]), 1+M-sum(w[which(w[,2]==1), 1])),
@@ -127,7 +127,7 @@ spNmix_den <- function(n, X, M, niters, tune=c(0.2, 10, 0.2, 0.2, 5),cov,
     
     # update psi
     psi <- vapply(1:levs, function(x){
-      rbeta(1, 1+sum(w[which(w[,2]==x), 1]), 1+M-sum(w[which(w[,2]==x), 1]))
+      rbeta(1, 1+sum(w[which(w[,2]==x), 1]), 1+nrow(w[which(w[,2]==x),]))
     },
     FUN.VALUE = 0,
     USE.NAMES = FALSE)
