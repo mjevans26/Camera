@@ -1,8 +1,10 @@
 EN14 <- readRDS(file = "input_data.rds")
 library(rgdal)
 DEV<-readOGR("D:/MikeGradSchool/PhD/GIS/SMRC", "NEB_DensClass_3kelim_SPm")
+HAB <- readOGR("D:/MikeGradSchool/PhD/GIS/SMRC", "NEB_Hab_SPm_3kelim")
 bounds <- readOGR("D:/MikeGradSchool/PhD/GIS/SMRC/Buffers", "NEB10kBuff")
 DEV@data[,1] <- as.numeric(DEV@data[,1])
+HAB@data[,3] <- as.numeric(HAB@data[,3])
 
 psi <- c(rbeta(1, 1+sum(w[which(w[,2]==1), 1]), 1+M-sum(w[which(w[,2]==1), 1])),
          rbeta(1, 1+sum(w[which(w[,2]==2), 1]), 1+M-sum(w[which(w[,2]==2), 1])),
