@@ -1,7 +1,7 @@
 EN14 <- readRDS(file = "input_data.rds")
 library(rgdal)
 DEV<-readOGR("D:/MikeGradSchool/PhD/GIS/SMRC", "NEB_DensClass_3kelim_SPm")
-HAB <- readOGR("D:/MikeGradSchool/PhD/GIS/SMRC", "NEB_Hab_SPm_3kelim")
+HAB <- readOGR("I:/MikeGradSchool/PhD/GIS/SMRC", "NEB_Hab_SPm_3kelim")
 bounds <- readOGR("D:/MikeGradSchool/PhD/GIS/SMRC/Buffers", "NEB10kBuff")
 DEV@data[,1] <- as.numeric(DEV@data[,1])
 HAB@data[,3] <- as.numeric(HAB@data[,3])
@@ -171,5 +171,8 @@ spNmix_den <- function(n, X, M, niters, tune=c(0.2, 10, 0.2, 0.2, 5),cov,
   list(out=out, last=last, Sout=Sout)
 }
 
-test <- spNmix_den(EN14$y, EN14$X, 700, 50000, tune=c(0.2, 10, 0.2, 0.2, 5), EN14$forest,
+gfor_sfor_ddev <- spNmix_den(EN14$y, EN14$X, 700, 50000, tune=c(0.2, 10, 0.2, 0.2, 5), EN14$forest,
                    DEV, bounds, monitorS=FALSE)
+
+gfor_sfor_dfor <- spNmix_den(EN14$y, EN14$X, 700, 50000, tune=c(0.2, 10, 0.2, 0.2, 5), EN14$forest,
+                             HAB, bounds, monitorS=FALSE)
