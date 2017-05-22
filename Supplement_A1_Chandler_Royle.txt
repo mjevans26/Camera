@@ -273,7 +273,9 @@ spNmix <- function(n, X, M, niters, xlims, ylims, tune=c(0.1, 0.1, 2),
 # This version *does* update z
 spNmixZ <- function(n, X, M, niters, xlims, ylims, tune=c(0.1, 0.1, 3))
 {
+    #J = traps
     J <- nrow(n)
+    #K = occassions
     K <- ncol(n)
 
     # initial values
@@ -284,12 +286,14 @@ spNmixZ <- function(n, X, M, niters, xlims, ylims, tune=c(0.1, 0.1, 3))
     lam <- lam0*exp(-(D*D)/(2*sigma*sigma))
     w <- rbinom(M, 1, .7)
     psi <- runif(1, .2, .8)
+    #z = array of possible individuals * traps * occassions
     z <- array(NA, c(M,J,K))
     for(j in 1:J) {
         for(k in 1:K) {
             z[,j,k] <- rmultinom(1, n[j,k], lam[,j]*w)
         }
     }
+    z[]
     # in case the first sigma.cand is rejected
     ll <- sum(dpois(z, lam*w, log=TRUE))
 
