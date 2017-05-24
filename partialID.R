@@ -1,4 +1,4 @@
-spNmixZ <- function(n, X, M, l, niters, xlims, ylims, tune=c(0.1, 0.1, 3))
+spNmixZ <- function(n, X, M, l, niters, xlims, ylims, tune=c(10, 0.15, 5))
 {
   #J = traps
   J <- nrow(n)
@@ -7,23 +7,31 @@ spNmixZ <- function(n, X, M, l, niters, xlims, ylims, tune=c(0.1, 0.1, 3))
   #L = number marked individuals
   I <- nrow(l)
   # initial values
-  S <- cbind(runif(M,0,15), runif(M,0,15))
+  S <- cbind(runif(M, xlims[1], xlims[2]),
+             runif(M, ylims[1], ylims[2]))
+  #activity centers for marked individuals
+  for(i in 1:I){
+    S[i,1] <- mean(X[l[i, which(l[i,]!=0)], 1])
+    S[i,2] <- mean(X[l[i, which(l[i,]!=0)], 2])
+  }
   D <- e2dist1(S, X)
-  sigma <-runif(1, .25, 1.25)
+  sigma <-runif(1, 500, 2000)
   lam0 <- runif(1, .1, 1)
   lam <- lam0*exp(-(D*D)/(2*sigma*sigma))
   w <- c(rep(1,I),rbinom(M-I, 1, .7))
   psi <- runif(1, .2, .8)
   #z = array of possible individuals * traps * occassions
-  z <- array(NA, c(M,J,K))
+  z <- array(0, c(M,J,K))
+  #fill in capture histories for marked individuals
   for(i in 1:I){
     for(k in 1:K){
-      z[i,l[i,j],k] <- 1
+      z[i,l[i,k],k] <- 1
     }
   }
+  #complete z with latent capture histories for unobserved individuals
   for(j in 1:J) {
     for(k in 1:K) {
-      z[I+1:M,j,k] <- rmultinom(1, n[j,k] - sum(z[1:I,j,k]), lam[,j]*w)
+      z[(I+1):M,j,k] <- rmultinom(1, max(n[j,k] - sum(z[1:I,j,k]),0), lam[(I+1):M,j]*w[(I+1):M])
     }
   }
   # in case the first sigma.cand is rejected
@@ -72,7 +80,7 @@ spNmixZ <- function(n, X, M, l, niters, xlims, ylims, tune=c(0.1, 0.1, 3))
     
     # update w
     wUps <- 0
-    for(i in 1:M) {
+    for(i in (1+I):M) {
       wcand<-w
       wcand[i] <- if(w[i]==0) 1 else 0
       llcand <- sum(dpois(z, lam*wcand, log=TRUE) )
@@ -86,7 +94,7 @@ spNmixZ <- function(n, X, M, l, niters, xlims, ylims, tune=c(0.1, 0.1, 3))
     }
     
     # update psi
-    psi <- rbeta(1, 1+sum(w), 1+M-sum(w))
+    psi <- rbeta(1, 1+sum(w[(1+I):M]), 1+M-sum(w[(1+I):M]))
     
     # update S
     Sups <- 0
@@ -115,7 +123,7 @@ spNmixZ <- function(n, X, M, l, niters, xlims, ylims, tune=c(0.1, 0.1, 3))
       zip <- lam[,j]*w
       probs <- zip/sum(zip)
       for(k in 1:K)
-        z[,j,k] <- rmultinom(1, n[j,k], probs)
+        z[(I+1):M,j,k] <- rmultinom(1, max(n[j,k] - sum(z[1:I,j,k]),0), probs[(I+1):M])
     }
     #        }
     
@@ -127,3 +135,7 @@ spNmixZ <- function(n, X, M, l, niters, xlims, ylims, tune=c(0.1, 0.1, 3))
   list(out=out, last=last)
 }
 
+null_mixed <- spNmixZ(n = EN14$y, X = EN14$X, M = 700,
+        l = EN14$mark, niters = 50000,
+        xlims = EN14$xlims, ylims = EN14$ylims,
+        tune=c(10, 0.15, 5))
